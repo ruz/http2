@@ -71,11 +71,16 @@ class SimpleAsyncHTTP2Client(simple_httpclient.SimpleAsyncHTTPClient):
     def __new__(cls, *args, **kwargs):
         force_instance = kwargs.pop('force_instance', False)
         host = kwargs['host']
+        client_key = kwargs.get('http_client_key')
+
+        if not client_key:
+            client_key = host
+
         if force_instance or host not in cls.CLIENT_REGISTRY:
             client = simple_httpclient.SimpleAsyncHTTPClient.__new__(cls, *args, force_instance=True, **kwargs)
-            cls.CLIENT_REGISTRY.setdefault(host, client)
+            cls.CLIENT_REGISTRY.setdefault(client_key, client)
         else:
-            client = cls.CLIENT_REGISTRY[host]
+            client = cls.CLIENT_REGISTRY[client_key]
 
         return client
 
