@@ -50,6 +50,7 @@ class HTTP2Error(HTTPError):
 
 class HTTP2ConnectionTimeout(HTTP2Error):
     def __init__(self, time_cost=None):
+        super(HTTP2ConnectionTimeout, self).__init__(599)
         self.time_cost = time_cost
 
 
