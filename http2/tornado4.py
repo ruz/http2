@@ -378,6 +378,10 @@ class _HTTP2ConnectionContext(object):
         stream_id = self.h2_conn.get_next_available_stream_id()
         self.h2_conn.send_headers(stream_id, http2_headers, end_stream=not request.body)
         if request.body:
+            incr = len(request.body) - self.h2_conn.local_flow_control_window(stream_id)
+            if incr > 0:
+                logger.warning('Increment flow control window size by %s', incr)
+                self.h2_conn.increment_flow_control_window(incr, stream_id)
             self.h2_conn.send_data(stream_id, request.body, end_stream=True)
 
         self._flush_to_stream()
