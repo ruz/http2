@@ -368,7 +368,7 @@ class _HTTP2ConnectionContext(object):
         if data_to_send:
             self.io_stream.write(data_to_send)
 
-    def start_request(self, request):
+    def send_request(self, request):
         http2_headers = [
             (':authority', request.headers.pop('Host')),
             (':path', request.url),
@@ -376,17 +376,8 @@ class _HTTP2ConnectionContext(object):
             (':method', request.method),
         ] + request.headers.items()
 
-        self.stream_id = self.h2_conn.get_next_available_stream_id()
-        self.h2_conn.send_headers(self.stream_id, http2_headers, end_stream=not request.body)
-
-        return self.stream_id
-
-    def send_request(self, request):
-        # if self.stream_id is None:
-        #     stream_id = self.start_request(request)
-        # else:
-        #     stream_id = self.stream_id
-        stream_id = self.start_request(request)
+        stream_id = self.h2_conn.get_next_available_stream_id()
+        self.h2_conn.send_headers(stream_id, http2_headers, end_stream=not request.body)
 
         if request.body:
             data = request.body
@@ -399,7 +390,6 @@ class _HTTP2ConnectionContext(object):
                 if data_size == 0 or size == data_size:
                     self.h2_conn.send_data(stream_id, data, end_stream=True)
                     self._flush_to_stream()
-                    # self.stream_id = None
                     break
                 elif size > 0:
                     self.h2_conn.send_data(stream_id, data[:size], end_stream=False)
