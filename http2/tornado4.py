@@ -378,13 +378,22 @@ class _HTTP2ConnectionContext(object):
         stream_id = self.h2_conn.get_next_available_stream_id()
         self.h2_conn.send_headers(stream_id, http2_headers, end_stream=not request.body)
         if request.body:
-            # incr = len(request.body) - self.h2_conn.local_flow_control_window(stream_id)
-            # if incr > 0:
-            #     logger.warning('Increment flow control window size by %s', incr)
-            #     self.h2_conn.increment_flow_control_window(incr, stream_id)
-            self.h2_conn.send_data(stream_id, request.body, end_stream=True)
+            data = request.body
+            while True:
+                data_size = len(data)
+                size = min(
+                    data_size,
+                    self.h2_conn.local_flow_control_window(stream_id),
+                    self.h2_conn.max_outbound_frame_size)
+                if data_size == 0 or size == data_size:
+                    self.h2_conn.send_data(stream_id, data, end_stream=True)
+                    self._flush_to_stream()
+                    break
+                elif size > 0:
+                    self.h2_conn.send_data(stream_id, data[:size], end_stream=False)
+                    data = data[size:]
+                    self._flush_to_stream()
 
-        self._flush_to_stream()
         return stream_id
 
     def set_stream_delegate(self, stream_id, stream_delegate):
