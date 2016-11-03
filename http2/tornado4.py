@@ -314,7 +314,6 @@ class _HTTP2ConnectionContext(object):
         self.initial_window_size = initial_window_size
         self.max_buffer_size = max_buffer_size
         self.is_closed = False
-        self.stream_id=None
 
         # h2 contexts
         self.stream_delegates = {}
