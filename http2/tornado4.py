@@ -377,7 +377,7 @@ class _HTTP2ConnectionContext(object):
         ] + request.headers.items()
 
         self.stream_id = self.h2_conn.get_next_available_stream_id()
-        self.h2_conn.send_headers(self.stream_id, http2_headers, end_stream=False)
+        self.h2_conn.send_headers(self.stream_id, http2_headers, end_stream=not request.body)
 
         return self.stream_id
 
