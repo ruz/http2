@@ -390,6 +390,9 @@ class _HTTP2ConnectionContext(object):
                     self.h2_conn.send_data(stream_id, data, end_stream=True)
                     self._flush_to_stream()
                     break
+                elif data_size and size == 0:
+                    logger.info('Try to increment flow control window')
+                    self.h2_conn.increment_flow_control_window(data_size, stream_id)
                 elif size > 0:
                     self.h2_conn.send_data(stream_id, data[:size], end_stream=False)
                     data = data[size:]
