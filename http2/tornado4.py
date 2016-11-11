@@ -380,20 +380,17 @@ class _HTTP2ConnectionContext(object):
 
         if request.body:
             data = request.body
-            while True:
-                data_size = len(data)
-                size = min(
-                    data_size,
-                    self.h2_conn.local_flow_control_window(stream_id),
-                    self.h2_conn.max_outbound_frame_size)
-                if data_size == 0 or size == data_size or size == 0:
-                    self.h2_conn.send_data(stream_id, data, end_stream=True)
-                    self._flush_to_stream()
-                    break
-                elif size > 0:
-                    self.h2_conn.send_data(stream_id, data[:size], end_stream=False)
-                    data = data[size:]
-                    self._flush_to_stream()
+            data_size = len(data)
+            size = min(
+                data_size,
+                self.h2_conn.local_flow_control_window(stream_id),
+                self.h2_conn.max_outbound_frame_size)
+
+            if size < data_size:  # @NOTICE dirty hack!
+                self.h2_conn.outbound_flow_control_window += data_size
+
+            self.h2_conn.send_data(stream_id, data, end_stream=True)
+            self._flush_to_stream()
 
         return stream_id
 
