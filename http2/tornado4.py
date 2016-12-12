@@ -368,17 +368,20 @@ class _HTTP2ConnectionContext(object):
             self.io_stream.write(data_to_send)
 
     def send_request(self, request):
-        http2_headers = [
-            (':authority', request.headers.pop('Host')),
-            (':path', request.url),
-            (':scheme', self.schema),
-            (':method', request.method),
-        ] + request.headers.items()
+        http2_headers = collections.OrderedDict()
 
-        stream_id = self.h2_conn.get_next_available_stream_id()
-        self.h2_conn.send_headers(stream_id, http2_headers, end_stream=not request.body)
+        http2_headers[':authority'] = request.headers.pop('Host')
+        http2_headers[':path'] = request.url
+        http2_headers[':scheme'] = self.schema
+        http2_headers[':method'] = request.method
+
+        for key, value in request.headers.iteritems():
+            http2_headers[key] = value
 
         if request.body:
+            stream_id = self.h2_conn.get_next_available_stream_id()
+            self.h2_conn.send_headers(stream_id, http2_headers, end_stream=False)
+
             data = request.body
             data_size = len(data)
             size = min(
