@@ -89,7 +89,7 @@ class SimpleAsyncHTTP2Client(simple_httpclient.SimpleAsyncHTTPClient):
                    hostname_mapping=None, max_buffer_size=104857600,
                    resolver=None, defaults=None, secure=True,
                    cert_options=None, enable_push=False, connect_timeout=20,
-                   initial_window_size=65535, **conn_kwargs):
+                   request_timeout=20, initial_window_size=65535, **conn_kwargs):
         # initially, we disables stream multiplexing and wait the settings frame
         super(SimpleAsyncHTTP2Client, self).initialize(
             io_loop=io_loop, max_clients=1,
@@ -106,6 +106,7 @@ class SimpleAsyncHTTP2Client(simple_httpclient.SimpleAsyncHTTPClient):
         self.initial_window_size = initial_window_size
 
         self.connect_timeout = connect_timeout
+        self.request_timeout = request_timeout
         self.connection_factory = _HTTP2ConnectionFactory(
             io_loop=self.io_loop, host=host, port=port,
             max_buffer_size=self.max_buffer_size, secure=secure,
@@ -367,6 +368,20 @@ class _HTTP2ConnectionContext(object):
         if data_to_send:
             self.io_stream.write(data_to_send)
 
+    def _prepare_request(self, request, stream_id, http2_headers):
+        self.h2_conn.send_headers(stream_id, http2_headers, end_stream=False)
+        data = request.body
+        data_size = len(data)
+        size = min(
+            data_size,
+            self.h2_conn.local_flow_control_window(stream_id),
+            self.h2_conn.max_outbound_frame_size)
+
+        if size < data_size:  # @NOTICE dirty hack!
+            self.h2_conn.outbound_flow_control_window += data_size
+
+        self.h2_conn.send_data(stream_id, data, end_stream=True)
+
     def send_request(self, request):
         http2_headers = collections.OrderedDict()
 
@@ -380,20 +395,17 @@ class _HTTP2ConnectionContext(object):
 
         if request.body:
             stream_id = self.h2_conn.get_next_available_stream_id()
-            self.h2_conn.send_headers(stream_id, http2_headers, end_stream=False)
-
-            data = request.body
-            data_size = len(data)
-            size = min(
-                data_size,
-                self.h2_conn.local_flow_control_window(stream_id),
-                self.h2_conn.max_outbound_frame_size)
-
-            if size < data_size:  # @NOTICE dirty hack!
-                self.h2_conn.outbound_flow_control_window += data_size
-
-            self.h2_conn.send_data(stream_id, data, end_stream=True)
-            self._flush_to_stream()
+            self._prepare_request(request, stream_id, http2_headers)
+            try:
+                self._flush_to_stream()
+            except h2.exceptions.StreamClosedError as err:
+                logger.warn(err)
+                # logger.info('OLD STREAM_ID %s', stream_id)
+                self.reset_stream(stream_id)
+                stream_id = self.h2_conn.get_next_available_stream_id()
+                # logger.info('NEW STREAM_ID %s', stream_id)
+                self._prepare_request(request, http2_headers, stream_id)
+                self._flush_to_stream()
 
         return stream_id
 
