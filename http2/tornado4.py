@@ -404,7 +404,7 @@ class _HTTP2ConnectionContext(object):
                 self.reset_stream(stream_id)
                 stream_id = self.h2_conn.get_next_available_stream_id()
                 # logger.info('NEW STREAM_ID %s', stream_id)
-                self._prepare_request(request, http2_headers, stream_id)
+                self._prepare_request(request, stream_id, http2_headers)
                 self._flush_to_stream()
 
         return stream_id
