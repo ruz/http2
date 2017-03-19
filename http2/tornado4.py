@@ -401,7 +401,8 @@ class _HTTP2ConnectionContext(object):
             except h2.exceptions.StreamClosedError as err:
                 logger.warn(err)
                 # logger.info('OLD STREAM_ID %s', stream_id)
-                self.reset_stream(stream_id)
+                # self.reset_stream(stream_id)
+                self.h2_conn.end_stream(stream_id)
                 stream_id = self.h2_conn.get_next_available_stream_id()
                 # logger.info('NEW STREAM_ID %s', stream_id)
                 self._prepare_request(request, stream_id, http2_headers)
