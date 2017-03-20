@@ -171,7 +171,9 @@ class SimpleAsyncHTTP2Client(simple_httpclient.SimpleAsyncHTTPClient):
 
         # move active request to pending
         for key, (request, callback) in self.active.items():
-            self.queue.appendleft((key, request, callback))
+            req = _HTTP2Stream.prepare_request(request, self.host)
+            self.queue.appendleft((key, req, callback))
+            self.waiting[key] = (None, None, None)  # @NOTICE: in this case we need only key in waiting
 
         self.active.clear()
 
