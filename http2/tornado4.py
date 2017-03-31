@@ -395,21 +395,12 @@ class _HTTP2ConnectionContext(object):
         for key, value in request.headers.iteritems():
             http2_headers[key] = value
 
+        stream_id = self.h2_conn.get_next_available_stream_id()
+        self.h2_conn.send_headers(stream_id, http2_headers, end_stream=not request.body)
         if request.body:
-            stream_id = self.h2_conn.get_next_available_stream_id()
-            self._prepare_request(request, stream_id, http2_headers)
-            try:
-                self._flush_to_stream()
-            except h2.exceptions.StreamClosedError as err:
-                logger.warn(err)
-                # logger.info('OLD STREAM_ID %s', stream_id)
-                # self.reset_stream(stream_id)
-                self.h2_conn.end_stream(stream_id)
-                stream_id = self.h2_conn.get_next_available_stream_id()
-                # logger.info('NEW STREAM_ID %s', stream_id)
-                self._prepare_request(request, stream_id, http2_headers)
-                self._flush_to_stream()
+            self.h2_conn.send_data(stream_id, request.body, end_stream=True)
 
+        self._flush_to_stream()
         return stream_id
 
     def set_stream_delegate(self, stream_id, stream_delegate):
@@ -693,6 +684,8 @@ class _HTTP2Stream(httputil.HTTPMessageDelegate):
         elif isinstance(event, h2.events.PushedStreamReceived):
             stream = self.from_push_stream(event)
             self._pushed_streams[event.pushed_stream_id] = stream
+        elif isinstance(event, h2.events.StreamReset):
+            self.context.reset_stream(self.stream_id)
         else:
             logger.warning('ignored event: %r, %r', event, event.__dict__)
 
