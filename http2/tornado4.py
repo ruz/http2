@@ -17,6 +17,9 @@ import h2.events
 import h2.settings
 import h2.connection
 import h2.exceptions
+
+from hpack.struct import HeaderTuple, NeverIndexedHeaderTuple
+
 from tornado import (
     httputil, log, stack_context,
     simple_httpclient, netutil
@@ -385,15 +388,20 @@ class _HTTP2ConnectionContext(object):
         self.h2_conn.send_data(stream_id, data, end_stream=True)
 
     def send_request(self, request):
-        http2_headers = collections.OrderedDict()
+        http2_headers = []
+        http2_headers.append(HeaderTuple(':authority', request.headers.pop('Host')))
+        http2_headers.append(NeverIndexedHeaderTuple(':path', request.url))
+        http2_headers.append(HeaderTuple(':scheme', self.schema))
+        http2_headers.append(HeaderTuple(':method', request.method))
 
-        http2_headers[':authority'] = request.headers.pop('Host')
-        http2_headers[':path'] = request.url
-        http2_headers[':scheme'] = self.schema
-        http2_headers[':method'] = request.method
+        sensitive_headers = ('apns-topic', 'authorization')
 
         for key, value in request.headers.iteritems():
-            http2_headers[key] = value
+            if key.lower() in sensitive_headers:
+                new = NeverIndexedHeaderTuple(key, value)
+            else:
+                new = HeaderTuple(key, value)
+            http2_headers.append(new)
 
         stream_id = self.h2_conn.get_next_available_stream_id()
         self.h2_conn.send_headers(stream_id, http2_headers, end_stream=not request.body)
