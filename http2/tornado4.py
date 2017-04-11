@@ -698,6 +698,11 @@ class _HTTP2Stream(httputil.HTTPMessageDelegate):
             self.data_received(event.data)
         elif isinstance(event, h2.events.StreamEnded):
             self._stream_ended = True
+            if self._pending_body is not None:
+                # we still have data to send, server responded earlier
+                self._pending_body = None
+                self.context.h2_conn.end_stream( self.stream_id )
+                self.context._flush_to_stream()
             self.context.remove_stream_delegate(self.stream_id)
             if len(self._pushed_responses) == len(self._pushed_streams):
                 self.finish()
