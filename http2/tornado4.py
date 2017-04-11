@@ -679,11 +679,16 @@ class _HTTP2Stream(httputil.HTTPMessageDelegate):
         if self._finalized:
             return
 
-        if self.release_callback is not None:
-            self.release_callback()
-
         with stack_context.NullContext():
-            self.io_loop.add_callback(functools.partial(self.final_callback, response))
+            self.io_loop.add_callback(functools.partial(
+                self.final_callback, response
+            ))
+
+            if self.release_callback is not None:
+                self.io_loop.add_callback(functools.partial(
+                    self.release_callback
+                ))
+
         self._finalized = True
 
     def handle_event(self, event):
