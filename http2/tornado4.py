@@ -532,6 +532,8 @@ class _HTTP2Stream(httputil.HTTPMessageDelegate):
             self.send_body()
 
     def send_body(self, append=True):
+        if self._pending_body is None:
+            return
         h2_conn = self.context.h2_conn
         window_size = h2_conn.local_flow_control_window(self.stream_id)
         frame_size = h2_conn.max_outbound_frame_size
@@ -826,6 +828,9 @@ class _HTTP2Stream(httputil.HTTPMessageDelegate):
     def _on_timeout(self):
         self._timeout = None
         self.connection_timeout = True
+        self._pending_body = None
+        if not self._stream_ended:
+            self.context.reset_stream(self.stream_id, reason=ErrorCodes.CANCEL, flush=True)
         raise _RequestTimeout()
 
     def window_updated(self):
