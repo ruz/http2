@@ -12,9 +12,9 @@ import functools
 import contextlib
 import collections
 
-import h2.errors
+from h2.errors import ErrorCodes
 import h2.events
-import h2.settings
+from h2.settings import SettingCodes
 import h2.connection
 import h2.exceptions
 
@@ -130,7 +130,7 @@ class SimpleAsyncHTTP2Client(simple_httpclient.SimpleAsyncHTTPClient):
 
     def _adjust_settings(self, event):
         logger.debug('settings updated: %r', event.changed_settings)
-        settings = event.changed_settings.get(h2.settings.MAX_CONCURRENT_STREAMS)
+        settings = event.changed_settings.get(SettingCodes.MAX_CONCURRENT_STREAMS)
         if settings:
             self.max_clients = min(settings.new_value, self.max_streams)
             if settings.new_value > settings.original_value:
@@ -325,11 +325,11 @@ class _HTTP2ConnectionContext(object):
         self.stream_delegates = {}
         self.event_handlers = {}  # connection level event, event -> handler
         self.reset_stream_ids = collections.deque(maxlen=50)
-        self.h2_conn = h2.connection.H2Connection(client_side=True)
+        self.h2_conn = h2.connection.H2Connection()
         self.h2_conn.initiate_connection()
         self.h2_conn.update_settings({
-            h2.settings.ENABLE_PUSH: int(self.enable_push),
-            h2.settings.INITIAL_WINDOW_SIZE: self.initial_window_size,
+            SettingCodes.ENABLE_PUSH: int(self.enable_push),
+            SettingCodes.INITIAL_WINDOW_SIZE: self.initial_window_size,
         })
 
         self._setup_reading()
@@ -423,7 +423,7 @@ class _HTTP2ConnectionContext(object):
     def remove_event_handler(self, event_type):
         del self.event_handlers[event_type]
 
-    def reset_stream(self, stream_id, reason=h2.errors.REFUSED_STREAM, flush=False):
+    def reset_stream(self, stream_id, reason=ErrorCodes.REFUSED_STREAM, flush=False):
         if self.is_closed:
             return
 
