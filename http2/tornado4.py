@@ -216,13 +216,14 @@ class SimpleAsyncHTTP2Client(simple_httpclient.SimpleAsyncHTTPClient):
 
     def _handle_request(self, request, release_callback, final_callback):
         with self.connection.handle_exception():
-            stream_id = self.connection.send_request(request)
-            _HTTP2Stream(
+            stream_id = self.connection.h2_conn.get_next_available_stream_id()
+            stream = _HTTP2Stream(
                 io_loop=self.io_loop, context=self.connection,
                 request=request, stream_id=stream_id,
                 release_callback=release_callback,
                 final_callback=final_callback,
             )
+            stream.send_request(request)
 
 
 class _HTTP2ConnectionFactory(object):
@@ -331,6 +332,9 @@ class _HTTP2ConnectionContext(object):
             SettingCodes.ENABLE_PUSH: int(self.enable_push),
             SettingCodes.INITIAL_WINDOW_SIZE: self.initial_window_size,
         })
+        self.flow_control = collections.deque([])
+
+        self.add_event_handler(h2.events.WindowUpdated, self.window_updated)
 
         self._setup_reading()
         self._flush_to_stream()
@@ -373,43 +377,15 @@ class _HTTP2ConnectionContext(object):
         if data_to_send:
             self.io_stream.write(data_to_send)
 
-    def _prepare_request(self, request, stream_id, http2_headers):
-        self.h2_conn.send_headers(stream_id, http2_headers, end_stream=False)
-        data = request.body
-        data_size = len(data)
-        size = min(
-            data_size,
-            self.h2_conn.local_flow_control_window(stream_id),
-            self.h2_conn.max_outbound_frame_size)
+    def window_updated(self, event):
+        logger.debug('window updated on connection')
 
-        if size < data_size:  # @NOTICE dirty hack!
-            self.h2_conn.outbound_flow_control_window += data_size
+        while len(self.flow_control) > 0:
+            stream = self.flow_control.popleft()
+            stream.send_body(append=False)
 
-        self.h2_conn.send_data(stream_id, data, end_stream=True)
-
-    def send_request(self, request):
-        http2_headers = []
-        http2_headers.append(HeaderTuple(':authority', request.headers.pop('Host')))
-        http2_headers.append(NeverIndexedHeaderTuple(':path', request.url))
-        http2_headers.append(HeaderTuple(':scheme', self.schema))
-        http2_headers.append(HeaderTuple(':method', request.method))
-
-        sensitive_headers = ('apns-topic', 'authorization')
-
-        for key, value in request.headers.iteritems():
-            if key.lower() in sensitive_headers:
-                new = NeverIndexedHeaderTuple(key, value)
-            else:
-                new = HeaderTuple(key, value)
-            http2_headers.append(new)
-
-        stream_id = self.h2_conn.get_next_available_stream_id()
-        self.h2_conn.send_headers(stream_id, http2_headers, end_stream=not request.body)
-        if request.body:
-            self.h2_conn.send_data(stream_id, request.body, end_stream=True)
-
-        self._flush_to_stream()
-        return stream_id
+            if self.h2_conn.outbound_flow_control_window <= 0:
+                break
 
     def set_stream_delegate(self, stream_id, stream_delegate):
         self.stream_delegates[stream_id] = stream_delegate
@@ -513,6 +489,7 @@ class _HTTP2Stream(httputil.HTTPMessageDelegate):
         self._stream_ended = False
         self._finalized = False
         self._decompressor = None
+        self._pending_body = None
 
         self.stream_id = stream_id
         self.request = request
@@ -530,6 +507,55 @@ class _HTTP2Stream(httputil.HTTPMessageDelegate):
             http_headers.add(name, value)
 
         return http_headers
+
+    def send_request(self, request):
+        http2_headers = []
+        http2_headers.append(HeaderTuple(':authority', request.headers.pop('Host')))
+        http2_headers.append(NeverIndexedHeaderTuple(':path', request.url))
+        http2_headers.append(HeaderTuple(':scheme', self.context.schema))
+        http2_headers.append(HeaderTuple(':method', request.method))
+
+        sensitive_headers = ('apns-topic', 'authorization')
+
+        for key, value in request.headers.iteritems():
+            if key.lower() in sensitive_headers:
+                new = NeverIndexedHeaderTuple(key, value)
+            else:
+                new = HeaderTuple(key, value)
+            http2_headers.append(new)
+
+        self.context.h2_conn.send_headers(self.stream_id, http2_headers, end_stream=not request.body)
+        self.context._flush_to_stream()
+
+        if request.body:
+            self._pending_body = request.body
+            self.send_body()
+
+    def send_body(self, append=True):
+        h2_conn = self.context.h2_conn
+        window_size = h2_conn.local_flow_control_window(self.stream_id)
+        frame_size = h2_conn.max_outbound_frame_size
+        bytes_to_send = min(window_size, len(self._pending_body))
+
+        end = False
+        while bytes_to_send > 0:
+            chunk_size = min(bytes_to_send, frame_size)
+            chunk_data = self._pending_body[:chunk_size]
+            end = chunk_size == len(self._pending_body)
+            h2_conn.send_data(self.stream_id, chunk_data, end_stream=end)
+            bytes_to_send -= chunk_size
+            self._pending_body = self._pending_body[chunk_size:]
+
+        if not end:
+            if h2_conn.outbound_flow_control_window <= 0:
+                if append:
+                    self.context.flow_control.append(self)
+                else:
+                    self.context.flow_control.appendleft(self)
+        else:
+            self._pending_body = None
+
+        self.context._flush_to_stream()
 
     def from_push_stream(self, event):
         headers = self.build_http_headers(event.headers)
@@ -672,6 +698,11 @@ class _HTTP2Stream(httputil.HTTPMessageDelegate):
             self.data_received(event.data)
         elif isinstance(event, h2.events.StreamEnded):
             self._stream_ended = True
+            if self._pending_body is not None:
+                # we still have data to send, server responded earlier
+                self._pending_body = None
+                self.context.h2_conn.end_stream( self.stream_id )
+                self.context._flush_to_stream()
             self.context.remove_stream_delegate(self.stream_id)
             if len(self._pushed_responses) == len(self._pushed_streams):
                 self.finish()
@@ -680,6 +711,8 @@ class _HTTP2Stream(httputil.HTTPMessageDelegate):
             self._pushed_streams[event.pushed_stream_id] = stream
         elif isinstance(event, h2.events.StreamReset):
             self.context.reset_stream(self.stream_id)
+        elif isinstance(event, h2.events.WindowUpdated):
+            self.window_updated()
         else:
             logger.warning('ignored event: %r, %r', event, event.__dict__)
 
@@ -789,6 +822,17 @@ class _HTTP2Stream(httputil.HTTPMessageDelegate):
         self._timeout = None
         self.connection_timeout = True
         raise _RequestTimeout()
+
+    def window_updated(self):
+        logger.debug('window updated on stream #%d', self.stream_id)
+
+        if self._pending_body is None:
+            return
+
+        if self in self.context.flow_control:
+            return
+
+        self.send_body(append=False)
 
     def on_connection_close(self, reason=None):
         try:
