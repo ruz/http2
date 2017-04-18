@@ -183,7 +183,7 @@ class SimpleAsyncHTTP2Client(simple_httpclient.SimpleAsyncHTTPClient):
     def _connection_terminated(self, event):
         self._on_connection_close(
             self.io_stream, 'Server requested, code: %s, last_stream_id: %s, additional_data: %s '
-            % event.error_code, event.last_stream_id, event.additional_data)
+            % (event.error_code, event.last_stream_id, event.additional_data))
 
     def _on_connection_ready(self, io_stream):
         # reset back-off, prevent reconnect within back-off period
