@@ -36,7 +36,7 @@ setup(
     },
     install_requires=[
         'h2>=2.5.0',
-        'tornado>=2.4.1',
+        'tornado>=4.0.0',
         'backports.ssl_match_hostname',
     ],
     license="Apache Software License",

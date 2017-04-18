@@ -27,4 +27,4 @@ else:
     if version_info[0] == 4:
         from http2.tornado4 import *
     elif version_info[0] == 2:
-        from http2.tornado2 import *
+        raise Exception('Only Tornado4 is supported, please upgrade')
