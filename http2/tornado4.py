@@ -341,7 +341,9 @@ class _HTTP2ConnectionContext(object):
 
         self.add_event_handler(h2.events.WindowUpdated, self.window_updated)
 
-        self._setup_reading()
+        self.io_stream.read_until_close(
+            streaming_callback=self._on_connection_streaming
+        )
         self._flush_to_stream()
 
     def on_connection_close(self, reason):
@@ -460,15 +462,6 @@ class _HTTP2ConnectionContext(object):
 
         for stream_id, stream_inbound in stream_inbounds.items():
             self.h2_conn.acknowledge_received_data(stream_inbound, stream_id)
-
-    def _setup_reading(self, *_):
-        if self.is_closed:
-            return
-
-        with stack_context.NullContext():
-            self.io_stream.read_bytes(
-                num_bytes=65535, callback=self._setup_reading,
-                streaming_callback=self._on_connection_streaming)
 
 
 class _HTTP2Stream(httputil.HTTPMessageDelegate):
