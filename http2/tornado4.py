@@ -282,6 +282,7 @@ class _HTTP2ConnectionFactory(object):
 
     @classmethod
     def _handle_exception(cls, close_callback, typ, value, tb):
+        logger.warning("Exception %s connecting: %s", typ, value)
         close_callback(io_stream=None, reason=value)
         return True
 
